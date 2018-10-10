@@ -36,12 +36,6 @@ const BIKE_STATION_STATUS_REQUEST_OPTIONS = {
 
 const BIKE_STATION_REQUEST_OPTIONS = {
     host: GBFS_HOST,
-    path: '/gbfs/en/station_status.json',
-    port: GBFS_PORT
-};
-
-const BIKE_STATION_REQUEST_OPTIONS = {
-    host: GBFS_HOST,
     path: '/gbfs/en/station_information.json',
     port: GBFS_PORT
 };
@@ -107,7 +101,6 @@ const BlueBikeStationInfoIntentHandler = {
         }
 
         try {
-
             console.log('attempting to retrieve address');
             const {deviceId} = requestEnvelope.context.System.device;
             console.log('device id: ' + deviceId);
@@ -123,8 +116,7 @@ const BlueBikeStationInfoIntentHandler = {
             console.log(respMessage);
             return responseBuilder
                 .speak(respMessage)
-                .reprompt(respMessage)
-                .withSimpleCard(message.BIKE_STATION_INFO_MESSAGE_CARD_HEADER, respMessage)
+                .withSimpleCard(messages.BIKE_STATION_INFO_MESSAGE_CARD_HEADER, respMessage)
                 .getResponse();
             // https.get(BIKE_STATION_REQUEST_OPTIONS, (resp) => {
             //     let data = '';
