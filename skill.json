@@ -9,8 +9,18 @@
             "Alexa tell hello world hello",
             "Alexa ask hello world say hello"
           ],
-          "name": "bluebike-station-info",
-          "description": "Sample Full Description"
+          "name": "Blue Bikes",
+          "description": "Alexa skill to allow you to ask if there's a Blue Bike available near you!"
+        },
+        "en-GB": {
+          "summary": "Blue Bikes",
+          "examplePhrases": [
+            "Alexa open hello world",
+            "Alexa tell hello world hello",
+            "Alexa ask hello world say hello"
+          ],
+          "name": "Blue Bikes",
+          "description": "Alexa skill to allow you to ask if there's a Blue Bike available near you!"
         }
       },
       "isAvailableWorldwide": true,
@@ -25,6 +35,11 @@
         }
       }
     },
-    "manifestVersion": "1.0"
+    "manifestVersion": "1.0",
+    "permissions": [
+      {
+        "name": "alexa::devices:all:address:full:read"
+      }
+    ]
   }
 }

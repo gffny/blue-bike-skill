@@ -1,0 +1,4 @@
+/lambda/custom/node_modules
+.ask/
+*.iml
+.idea/*
