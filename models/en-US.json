@@ -35,6 +35,20 @@
             "are there bicycles available",
             "is there a bicycle available"
           ]
+        },
+        {
+          "name": "FindLocalStationInfoIntent",
+          "slots": [
+
+          ],
+          "samples": [
+            "where is my local bike dock",
+            "find my local bike dock",
+            "where is my local bike stand",
+            "find my local bike stand",
+            "where is my local bike stop",
+            "find my local bike stop"
+          ]
         }
       ]
     }
