@@ -2,7 +2,7 @@
 /* eslint-disable  no-console */
 
 const Alexa = require('ask-sdk-core');
-const https = require('https');
+const fetch = require("node-fetch");
 
 const messages = {
     WELCOME_CARD_HEADER: 'Blue Bikes : Welcome',
@@ -20,25 +20,16 @@ const messages = {
     BIKE_STATION_MESSAGE_COUNT_VARIABLE: '[X]',
     BIKE_STATION_MESSAGE_ADDRESS_VARIABLE: '[Y]',
     BIKE_STATION_INFO_MESSAGE: 'There are [X] bikes available at your local station at [Y]',
-    BIKE_STATION_INFO_MESSAGE_CARD_HEADER: 'Station Info: Bike Count'
+    BIKE_STATION_INFO_MESSAGE_CARD_HEADER: 'Station Info: Bike Count',
+    BIKE_STATION_LOCAL_MESSAGE: 'Your local bike dock is [Y]',
+    BIKE_STATION_LOCAL_MESSAGE_CARD_HEADER: 'Station Info: Local Station'
 };
 
 const PERMISSIONS = ['read::alexa:device:all:address'];
-
-const GBFS_HOST = 'gbfs.bluebikes.com';
-const GBFS_PORT = 443;
-
-const BIKE_STATION_STATUS_REQUEST_OPTIONS = {
-    host: GBFS_HOST,
-    path: '/gbfs/en/station_status.json',
-    port: GBFS_PORT
-};
-
-const BIKE_STATION_REQUEST_OPTIONS = {
-    host: GBFS_HOST,
-    path: '/gbfs/en/station_information.json',
-    port: GBFS_PORT
-};
+const GOOGLE_GEOCODING_BASE = 'https://maps.googleapis.com/maps/api/geocode/json?key=AIzaSyDR4ru3toHxgFa5_eD2s3RX_Apo1xdY-kc&address=';
+const GBFS_HOST = 'https://gbfs.bluebikes.com';
+const GBFS_STATION_INFO = '/gbfs/en/station_information.json';
+const GBFS_STATION_STATUS = '/gbfs/en/station_status.json';
 
 const LaunchRequestHandler = {
     canHandle(handlerInput) {
@@ -54,30 +45,90 @@ const LaunchRequestHandler = {
     },
 };
 
-// const retrieveStationInfo = async () => {
-//
-//     console.log('retrieveStationInfo');
-//     https.get(BIKE_STATION_STATUS_REQUEST_OPTIONS, (resp) => {
-//         let data = '';
-//
-//         // A chunk of data has been recieved.
-//         resp.on('data', (chunk) => {
-//             data += chunk;
-//         });
-//
-//         // The whole response has been received. Print out the result.
-//         resp.on('end', () => {
-//             var stationArray = JSON.parse(data).data.stations;
-//             for (var i = 0; i < stationArray.length; i++) {
-//                 var station = stationArray[i];
-//                 if (station.station_id == '71') {
-//                     console.log('returning data for station 71: '+station.num_bikes_available);
-//                     return station.num_bikes_available;
-//                 }
-//             }
-//         });
-//     });
-// }
+function closestLocation(targetLocation, locationData) {
+    function vectorDistance(dx, dy) {
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function locationDistance(target, source) {
+        var dx = target.lat - source.lat,
+            dy = target.lng - source.lon;
+        return vectorDistance(dx, dy);
+    }
+
+    return locationData.reduce(function(prev, curr) {
+        var prevDistance = locationDistance(targetLocation, prev),
+            currDistance = locationDistance(targetLocation, curr);
+        return (prevDistance < currDistance) ? prev : curr;
+    });
+}
+
+const addressLocationGeocode = async address => {
+    try {
+        var addressStr = address.addressLine1 + ', ';
+        if (address.addressLine2) {
+            addressStr += address.addressLine2 + ', ';
+        }
+        if (address.addressLine3) {
+            addressStr += address.addressLine3 + ', ';
+        }
+        addressStr += address.city + ', ' + address.stateOrRegion + ', ' + address.postalCode;
+        console.log('address is: ' + addressStr);
+        const response = await fetch(GOOGLE_GEOCODING_BASE+addressStr);
+        if (response == null) {
+            console.log('invalid response from google geocode api');
+            throw 'invalid response from google geocode api';
+        }
+        const json = await response.json();
+        if (json.status != 'OK') {
+            console.log('invalid response from google geocode api');
+            throw 'invalid response from google geocode api';
+        }
+        console.log(
+            `City: ${json.results[0].formatted_address} -`,
+            `Latitude: ${json.results[0].geometry.location.lat} -`,
+            `Longitude: ${json.results[0].geometry.location.lng}`
+        );
+        return json.results[0].geometry.location;
+    } catch (error) {
+        console.log(error);
+    }
+};
+
+async function retrieveBlueBikeStationStatus() {
+    console.log('getting GBFS Station Status');
+    const response = await fetch(GBFS_HOST + GBFS_STATION_STATUS);
+    const json = await response.json();
+    if (json.data == null || json.data.stations == null) {
+        console.log('invalid response from GBFS API');
+        throw 'invalid response from GBFS API';
+    }
+    return json.data.stations;
+}
+
+async function retrieveLocalStation(requestEnvelope, serviceClientFactory) {
+    const {deviceId} = requestEnvelope.context.System.device;
+    console.log('device id: ' + deviceId);
+    const deviceAddressServiceClient = serviceClientFactory.getDeviceAddressServiceClient();
+    const address = await deviceAddressServiceClient.getFullAddress(deviceId);
+    if (address.addressLine1 === null && address.stateOrRegion === null) {
+        console.log('no address is set for the device');
+        throw 'no address is set for this device';
+    }
+    const deviceGeoLoc = await addressLocationGeocode(address);
+    console.log('getting GBFS Station Info for location: ' + deviceGeoLoc.lat + ' ' + deviceGeoLoc.lng);
+    const stationInfoJson = await((await(fetch(GBFS_HOST + GBFS_STATION_INFO))).json());
+    if (stationInfoJson.data == null || stationInfoJson.data.stations == null) {
+        console.log('invalid response from GBFS API');
+        throw 'invalid response from GBFS API';
+    }
+    const localStation = closestLocation(deviceGeoLoc, stationInfoJson.data.stations);
+    if (localStation == null) {
+        throw 'no local station found';
+    }
+    console.log('returning data for station: ' + localStation.station_id);
+    return localStation;
+}
 
 const BlueBikeStationInfoIntentHandler = {
     canHandle(handlerInput) {
@@ -85,72 +136,67 @@ const BlueBikeStationInfoIntentHandler = {
             && handlerInput.requestEnvelope.request.intent.name === 'BlueBikeStationInfoIntent';
     },
     async handle(handlerInput) {
-
         console.log('requesting how many bikes');
-
-        const {requestEnvelope, serviceClientFactory, responseBuilder} = handlerInput;
-
-        const consentToken = requestEnvelope.context.System.user.permissions && requestEnvelope.context.System.user.permissions.consentToken;
-
-        if (!consentToken) {
-            console.log('requesting consent to get device address');
-            return responseBuilder
-                .speak(messages.NOTIFY_MISSING_PERMISSIONS)
-                .withAskForPermissionsConsentCard(PERMISSIONS)
-                .getResponse();
-        }
-
         try {
-            console.log('attempting to retrieve address');
-            const {deviceId} = requestEnvelope.context.System.device;
-            console.log('device id: ' + deviceId);
-            const deviceAddressServiceClient = serviceClientFactory.getDeviceAddressServiceClient();
-            const address = await deviceAddressServiceClient.getFullAddress(deviceId);
-            if (address.addressLine1 === null && address.stateOrRegion === null) {
-                console.log('no address is set for the device')
+            const {requestEnvelope, serviceClientFactory, responseBuilder} = handlerInput;
+            const consentToken = requestEnvelope.context.System.user.permissions && requestEnvelope.context.System.user.permissions.consentToken;
+            if (!consentToken) {
+                console.log('requesting consent to get device address');
                 return responseBuilder
-                    .speak(messages.NO_ADDRESS)
+                    .speak(messages.NOTIFY_MISSING_PERMISSIONS)
+                    .withAskForPermissionsConsentCard(PERMISSIONS)
                     .getResponse();
             }
-            var respMessage = messages.BIKE_STATION_INFO_MESSAGE.replace(messages.BIKE_STATION_MESSAGE_COUNT_VARIABLE, '8').replace(messages.BIKE_STATION_MESSAGE_ADDRESS_VARIABLE, 'Conway Park - Somerville Avenue');
+            console.log('attempting to retrieve address');
+            const localStation = await retrieveLocalStation(requestEnvelope, serviceClientFactory);
+            const stationArray = await retrieveBlueBikeStationStatus();
+            const stationStatus = stationArray.find(station => station.station_id == localStation.station_id);
+            if (stationStatus != null) {
+                console.log('returning data for local station: '+stationStatus.num_bikes_available);
+                var respMessage = messages.BIKE_STATION_INFO_MESSAGE.replace(messages.BIKE_STATION_MESSAGE_COUNT_VARIABLE, stationStatus.num_bikes_available).replace(messages.BIKE_STATION_MESSAGE_ADDRESS_VARIABLE, 'Conway Park - Somerville Avenue');
+                console.log(respMessage);
+                return responseBuilder
+                    .speak(respMessage)
+                    .withSimpleCard(messages.BIKE_STATION_INFO_MESSAGE_CARD_HEADER, respMessage)
+                    .getResponse();
+            }
+            throw 'error fetching data from the Blue Bike Station Status API';
+        } catch (error) {
+            console.log('error: '+error);
+            if (error.name !== 'ServiceError') {
+                return responseBuilder
+                    .speak(messages.ERROR)
+                    .getResponse();
+            }
+            throw error;
+        }
+    },
+};
+
+const FindLocalDockIntentHandler = {
+    canHandle(handlerInput) {
+        return handlerInput.requestEnvelope.request.type === 'IntentRequest' && handlerInput.requestEnvelope.request.intent.name === 'FindLocalStationInfoIntent';
+    },
+    async handle(handlerInput) {
+        try {
+            console.log('requesting local station');
+            const {requestEnvelope, serviceClientFactory, responseBuilder} = handlerInput;
+            const consentToken = requestEnvelope.context.System.user.permissions && requestEnvelope.context.System.user.permissions.consentToken;
+            if (!consentToken) {
+                console.log('requesting consent to get device address');
+                return responseBuilder
+                    .speak(messages.NOTIFY_MISSING_PERMISSIONS)
+                    .withAskForPermissionsConsentCard(PERMISSIONS)
+                    .getResponse();
+            }
+            console.log('attempting to retrieve address');
+            const localStation = await retrieveLocalStation(requestEnvelope, serviceClientFactory);
+            var respMessage = messages.BIKE_STATION_LOCAL_MESSAGE.replace(messages.BIKE_STATION_MESSAGE_ADDRESS_VARIABLE, localStation.name);
             console.log(respMessage);
             return responseBuilder
                 .speak(respMessage)
-                .withSimpleCard(messages.BIKE_STATION_INFO_MESSAGE_CARD_HEADER, respMessage)
+                .withSimpleCard(messages.BIKE_STATION_LOCAL_MESSAGE_CARD_HEADER, respMessage)
                 .getResponse();
-            // https.get(BIKE_STATION_REQUEST_OPTIONS, (resp) => {
-            //     let data = '';
-            //
-            //     // A chunk of data has been received.
-            //     resp.on('data', (chunk) => {
-            //         data += chunk;
-            //     });
-            //
-            //     // The whole response has been received. Print out the result.
-            //     resp.on('end', () => {
-            //         var stationArray = JSON.parse(data).data.stations;
-            //         for (var i = 0; i < stationArray.length; i++) {
-            //             var station = stationArray[i];
-            //             if (station.station_id == '71') {
-            //                 console.log('returning data for station 71: '+station.num_bikes_available);
-            //                 // TODO handle is/are when there are 0,1,2 etc bikes available
-            //                 var respMessage = messages.BIKE_STATION_INFO_MESSAGE.replace(messages.BIKE_STATION_MESSAGE_VARIABLE, station.num_bikes_available);
-            //                 console.log(respMessage);
-            //                 return responseBuilder
-            //                     .speak(respMessage)
-            //                     .reprompt(respMessage)
-            //                     .withSimpleCard('Mary Katherine is great!', respMessage)
-            //                     .getResponse();
-            //             }
-            //         }
-            //     });
-            // });
-            // var respMessage = messages.BIKE_STATION_INFO_MESSAGE.replace(messages.BIKE_STATION_MESSAGE_VARIABLE, stationBikeCount);
-            // console.log(respMessage);
-            // return response
-            //     .speak()
-            //     .withSimpleCard('Mary Katherine is great!', respMessage)
-            //     .getResponse();
         } catch (error) {
             console.log('error: '+error);
             if (error.name !== 'ServiceError') {
@@ -221,6 +267,7 @@ exports.handler = skillBuilder
     .addRequestHandlers(
         LaunchRequestHandler,
         BlueBikeStationInfoIntentHandler,
+        FindLocalDockIntentHandler,
         HelpIntentHandler,
         CancelAndStopIntentHandler,
         SessionEndedRequestHandler
